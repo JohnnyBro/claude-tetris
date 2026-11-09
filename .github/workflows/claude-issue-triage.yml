@@ -1,0 +1,50 @@
+name: Claude Issue Triage
+
+on:
+  issues:
+    types: [opened, edited]
+
+concurrency:
+  group: triage-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  triage:
+    if: github.event.sender.type != 'Bot'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Triage issue with Claude
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: '--allowedTools "Read,Glob,Grep,Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh issue comment:*),Bash(gh label list:*)"'
+          prompt: |
+            Eres un asistente de triage de issues. Repositorio: ${{ github.repository }}. Issue: #${{ github.event.issue.number }} (evento: ${{ github.event.action }}).
+
+            Tareas:
+            1. Lee el issue con `gh issue view ${{ github.event.issue.number }} --repo ${{ github.repository }}`.
+            2. Lista los labels existentes con `gh label list --repo ${{ github.repository }}`. Asigna SOLO labels que ya existan (nunca crees nuevos), con `gh issue edit ${{ github.event.issue.number }} --repo ${{ github.repository }} --add-label ...`. Si el evento es `edited`, quita con `--remove-label` los labels que ya no apliquen.
+            3. Explora el código relevante (lee CLAUDE.md primero; la lógica está en game.js, index.html, style.css) para diagnosticar el problema o evaluar la solicitud.
+            4. Publica UN solo comentario de diagnóstico, en español, usando `gh issue comment ${{ github.event.issue.number }} --repo ${{ github.repository }} --edit-last --create-if-none --body "..."` (así, en ediciones, se actualiza el mismo comentario en vez de duplicarlo). Formato:
+
+            <!-- claude-triage -->
+            ## Diagnóstico automático
+            **Resumen:** ...
+            **Labels asignados:** ... (con breve justificación)
+            **Diagnóstico:** causa probable, archivos/funciones afectadas (`archivo:línea`)
+            **Propuesta de solución:** pasos concretos
+            **Riesgos / preguntas abiertas:** (si falta información, pídela)
+
+            Restricciones: no modifiques código, no abras PRs, no crees labels. Sé conciso.
